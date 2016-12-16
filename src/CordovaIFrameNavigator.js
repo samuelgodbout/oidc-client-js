@@ -8,6 +8,7 @@ export default class CordovaIFrameNavigator {
     
     prepare(params) {
         params.popupWindowFeatures = 'hidden=yes';
+        params.popupWindowHidden = true;
         let popup = new CordovaPopupWindow(params);
         return Promise.resolve(popup);
     }

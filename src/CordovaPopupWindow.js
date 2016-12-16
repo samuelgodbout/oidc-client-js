@@ -5,6 +5,7 @@ import Log from './Log';
 
 const DefaultPopupFeatures = 'location=no,toolbar=no,zoom=no';
 const DefaultPopupTarget = "_blank";
+const DefaultHidden = false;
 
 export default class CordovaPopupWindow {
 
@@ -18,9 +19,16 @@ export default class CordovaPopupWindow {
 
         this.features = params.popupWindowFeatures || DefaultPopupFeatures;
         this.target = params.popupWindowTarget || DefaultPopupTarget;
+        this.hidden = params.popupWindowHidden || DefaultHidden;
         
         this.redirect_uri = params.startUrl;
         Log.info("redirect_uri: " + this.redirect_uri);
+    }
+
+    _isSafariViewControllerInstalled(cordovaMetadata){
+        return ["cordova-plugin-safariviewcontroller"].some(function (name) {
+            return cordovaMetadata.hasOwnProperty(name)
+        })
     }
 
     _isInAppBrowserInstalled(cordovaMetadata) {
@@ -43,20 +51,58 @@ export default class CordovaPopupWindow {
             if (this._isInAppBrowserInstalled(cordovaMetadata) === false) {
                 return this._error("InAppBrowser plugin not found")
             }
-            this._popup = cordova.InAppBrowser.open(params.url, this.target, this.features);
-            if (this._popup) {
-                Log.info("popup successfully created");
-                
-                this._exitCallbackEvent = this._exitCallback.bind(this); 
-                this._loadStartCallbackEvent = this._loadStartCallback.bind(this);
-                
-                this._popup.addEventListener("exit", this._exitCallbackEvent, false);
-                this._popup.addEventListener("loadstart", this._loadStartCallbackEvent, false);
-            } else {
-                this._error("Error opening popup window");
+
+            if(this._isSafariViewControllerInstalled(cordovaMetadata) === true){
+                SafariViewController.isAvailable(function (available) {
+                    if (available) {
+                        SafariViewController.show({
+                            url: params.url,
+                            hidden: this.hidden, // default false. You can use this to load cookies etc in the background (see issue #1 for details).
+                            animated: !this.hidden, // default true, note that 'hide' will reuse this preference (the 'Done' button will always animate though)
+                            tintColor: "#00ffff", // default is ios blue
+                            barColor: "#0000ff", // on iOS 10+ you can change the background color as well
+                            controlTintColor: "#ffffff" // on iOS 10+ you can override the default tintColor
+                        },
+                        // this success handler will be invoked for the lifecycle events 'opened', 'loaded' and 'closed'
+                        function(result) {
+                            if (result.event === 'opened') {
+                                Log.info("safari view controller opened");
+                            } else if (result.event === 'loaded') {
+                                Log.info("safari view controller loaded");
+                                console.log('loaded');
+                            } else if (result.event === 'closed') {
+                                Log.info("safari view controller closed");
+                            }
+                        },
+                        function(msg) {
+                            return this._error("safari view controller error: " + msg);
+                        })
+                    }else{
+                        this._fallBackInAppBrowser(params);
+                    }
+                });
+
+                handleOpenURL.bind(this);
+            }else{
+                this._fallBackInAppBrowser(params);
             }
         }
         return this.promise;
+    }
+
+    _fallBackInAppBrowser(params){
+        this._popup = cordova.InAppBrowser.open(params.url, this.target, this.features);
+        if (this._popup) {
+            Log.info("popup successfully created");
+
+            this._exitCallbackEvent = this._exitCallback.bind(this);
+            this._loadStartCallbackEvent = this._loadStartCallback.bind(this);
+
+            this._popup.addEventListener("exit", this._exitCallbackEvent, false);
+            this._popup.addEventListener("loadstart", this._loadStartCallbackEvent, false);
+        } else {
+            this._error("Error opening popup window");
+        }
     }
 
     get promise() {
@@ -94,5 +140,14 @@ export default class CordovaPopupWindow {
             this._popup.close();
         }
         this._popup = null;
+    }
+}
+
+
+handleOpenURL = function(url){
+    if (url.startsWith('kops://token#')){
+        splitUrl = url.split("#");
+        fullUrl = this.redirect_uri + splitUrl;
+        this._success({ url: fullUrl });
     }
 }
